@@ -666,7 +666,7 @@ private:
 
 #error ChucK not support on Mac OS X 10.3 or lower
 
-#elif defined(__WINDOWS_DS__) || defined(__WINDOWS_ASIO__) 
+#elif defined(__WINDOWS_DS__) || defined(__WINDOWS_ASIO__)  || defined(__RTAUDIO_SOCKET__)
 	 	 	 	 
           #ifdef __cplusplus 
           extern "C" { 
