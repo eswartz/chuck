@@ -2232,7 +2232,7 @@ void RtMidiOut :: sendMessage( std::vector<unsigned char> *message )
 #endif  // __WINDOWS_MM__
 
 
-#if defined(__LINUX_OSS__) || defined(__DISABLE_MIDI__) // dummy
+#if defined(__DISABLE_MIDI__)
 
 /*void midiInputCallback( const MIDIPacketList *list, void *procRef, void *srcRef )
 {

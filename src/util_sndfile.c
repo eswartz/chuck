@@ -53,6 +53,10 @@
 #include "chuck_def.h"
 #include <math.h>
 
+#ifdef __MINGW32__
+#undef HAVE_GMTIME_R
+#endif
+
 /*
  * Copyright 1992 by Jutta Degener and Carsten Bormann, Technische
  * Universitaet Berlin.  See the accompanying file "COPYRIGHT" for
@@ -8215,7 +8219,7 @@ psf_fclose (SF_PRIVATE *psf)
 {	int retval = 0 ;
 
 	if (psf->do_not_close_descriptor)
-	{	(HANDLE) psf->filedes = INVALID_HANDLE_VALUE ;
+	{	psf->filedes = (int) INVALID_HANDLE_VALUE ;
 		return 0 ;
 		} ;
 
