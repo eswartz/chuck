@@ -7968,6 +7968,7 @@ public:
 #include <errno.h>
 
 struct SocketHandle {
+  ck_socket ssockets[2]; // Playback and record, respectively
   ck_socket sockets[2]; // Playback and record, respectively
   bool xrun[2];
 
@@ -8021,20 +8022,11 @@ bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsig
                                    RtAudio::StreamOptions *options )
 
 {
-  // Set access ... check user preference.
-  if ( options && (options->flags & RTAUDIO_NONINTERLEAVED) ) {
-    stream_.userInterleaved = false;
-    stream_.deviceInterleaved[mode] = true;
-  }
-  else {
-    stream_.userInterleaved = true;
-    stream_.deviceInterleaved[mode] = true;
-  }
+  stream_.userInterleaved = options && (options->flags & RTAUDIO_NONINTERLEAVED);
+  stream_.deviceInterleaved[mode] = false;
 
   stream_.sampleRate = sampleRate;
-  printf("sample rate: %d\n", sampleRate);
   stream_.userFormat = format;
-  printf("user format: %d\n", format);
   stream_.deviceFormat[mode] = RTAUDIO_FLOAT32;
 
   // Determine whether byte-swaping is necessary.
@@ -8042,11 +8034,8 @@ bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsig
 
   // Determine the number of channels for this device.  We support a possible
   // minimum device channel number > than the value requested by the user.
-  printf("channels: %d\n", channels);
   stream_.nUserChannels[mode] = channels;
   stream_.nDeviceChannels[mode] = channels;
-
-  fflush(stdout);
 
   // keep bufferSize as-is
   stream_.bufferSize = *bufferSize;
@@ -8097,8 +8086,8 @@ bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsig
     goto error;
   }
   printf( "Connected!\n" );
+  apiInfo->ssockets[mode] = ssock;
   apiInfo->sockets[mode] = sock;
-//  ck_close( ssock );
 
   // Allocate necessary internal buffers.
   unsigned long bufferBytes;
@@ -8162,10 +8151,9 @@ bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsig
   return SUCCESS;
 
 error:
-  if ( ssock )
-    ck_close( ssock );
-
   if ( apiInfo ) {
+    if ( apiInfo->ssockets[0] ) ck_close( apiInfo->ssockets[0] );
+    if ( apiInfo->ssockets[1] ) ck_close( apiInfo->ssockets[1] );
     if ( apiInfo->sockets[0] ) ck_close( apiInfo->sockets[0] );
     if ( apiInfo->sockets[1] ) ck_close( apiInfo->sockets[1] );
     delete apiInfo;
@@ -8204,6 +8192,8 @@ void RtApiSocket :: closeStream()
   }
 
   if ( apiInfo ) {
+    if ( apiInfo->ssockets[0] ) ck_close( apiInfo->ssockets[0] );
+    if ( apiInfo->ssockets[1] ) ck_close( apiInfo->ssockets[1] );
     if ( apiInfo->sockets[0] ) ck_close( apiInfo->sockets[0] );
     if ( apiInfo->sockets[1] ) ck_close( apiInfo->sockets[1] );
     delete apiInfo;
@@ -8239,11 +8229,8 @@ void RtApiSocket :: startStream()
 
   stream_.mutex.acquire();
 
-  SocketHandle *apiInfo = (SocketHandle *) stream_.apiHandle;
-
   stream_.state = STREAM_RUNNING;
 
- unlock:
   stream_.mutex.release();
 }
 
@@ -8321,7 +8308,7 @@ void RtApiSocket :: callbackEvent()
 
   if ( stream_.mode == INPUT || stream_.mode == DUPLEX ) {
 
-    // Setup parameters.
+    // Setup parameters and do buffer conversion if necessary.
     if ( stream_.doConvertBuffer[1] ) {
       buffer = stream_.deviceBuffer;
       channels = stream_.nDeviceChannels[1];
@@ -8354,29 +8341,37 @@ void RtApiSocket :: callbackEvent()
 
   if ( stream_.mode == OUTPUT || stream_.mode == DUPLEX ) {
 
+    int samples;
+
     // Setup parameters and do buffer conversion if necessary.
     if ( stream_.doConvertBuffer[0] ) {
       buffer = stream_.deviceBuffer;
       convertBuffer( buffer, stream_.userBuffer[0], stream_.convertInfo[0] );
-      channels = stream_.nDeviceChannels[0];
+      samples = stream_.bufferSize * stream_.nDeviceChannels[0];
       format = stream_.deviceFormat[0];
     }
     else {
       buffer = stream_.userBuffer[0];
-      channels = stream_.nUserChannels[0];
+      samples = stream_.bufferSize * stream_.nUserChannels[0];
       format = stream_.userFormat;
     }
 
     // Do byte swapping if necessary.
     if ( stream_.doByteSwap[0] )
-      byteSwapBuffer(buffer, stream_.bufferSize * channels, format);
+      byteSwapBuffer(buffer, samples, format);
 
     // Write samples to device in interleaved/non-interleaved format.
-    result = ck_send( apiInfo->sockets[0], buffer, stream_.bufferSize );
+    const char * ptr = buffer;
+    int len = formatBytes(format) * samples;
+    while (len > 0) {
+      result = ck_send( apiInfo->sockets[0], ptr, len );
 
-    if ( result < (int) stream_.bufferSize ) {
-      // Either an error or underrun occured.
-      goto unlock;
+      if ( result < 0 ) {
+        // Either an error or underrun occured.
+        goto unlock;
+      }
+      len -= result;
+      ptr += result;
     }
 
   }
@@ -8504,7 +8499,6 @@ unsigned int RtApi :: formatBytes( RtAudioFormat format )
   else if ( format == RTAUDIO_SINT8 )
     return 1;
 
-  printf("format=%d\n", format);
   errorText_ = "RtApi::formatBytes: undefined format.";
   error( RtError::WARNING );
 
