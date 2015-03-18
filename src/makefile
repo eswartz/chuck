@@ -115,7 +115,13 @@ LO_CSRCS+= lo/address.c lo/blob.c lo/bundle.c lo/message.c lo/method.c \
 COBJS=$(CSRCS:.c=.o)
 CXXOBJS=$(CXXSRCS:.cpp=.o)
 LO_COBJS=$(LO_CSRCS:.c=.o)
-OBJS=$(COBJS) $(CXXOBJS) #$(LO_COBJS)
+
+
+ifeq (,$(strip $(filter mingw,$(MAKECMDGOALS))))
+OBJS += $(LO_COBJS)
+endif
+
+OBJS=$(COBJS) $(CXXOBJS) $(LO_COBJS)
 
 LO_CFLAGS=-DHAVE_CONFIG_H -I.
 
