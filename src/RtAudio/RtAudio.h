@@ -228,7 +228,8 @@ class RtAudio
     MACOSX_CORE,    /*!< Macintosh OS-X Core Audio API. */
     WINDOWS_ASIO,   /*!< The Steinberg Audio Stream I/O API. */
     WINDOWS_DS,     /*!< The Microsoft Direct Sound API. */
-    RTAUDIO_DUMMY   /*!< A compilable but non-functional API. */
+    RTAUDIO_DUMMY,   /*!< A compilable but non-functional API. */
+    RTAUDIO_SOCKET  /*!< Sound transmitted over TCP sockets. */
   };
 
   //! The public device information structure for returning queried values.
@@ -538,6 +539,13 @@ class RtAudio
 
   typedef pthread_t ThreadHandle;
   typedef pthread_mutex_t StreamMutex;
+
+#elif defined(__RTAUDIO_SOCKET__)
+
+  #include "util_thread.h"
+
+  typedef XThread ThreadHandle;
+  typedef XMutex StreamMutex;
 
 #else // Setup for "dummy" behavior
 
@@ -1033,6 +1041,40 @@ public:
 
 #endif
 
+
+#if defined(__RTAUDIO_SOCKET__)
+
+class RtApiSocket: public RtApi
+{
+public:
+
+  RtApiSocket();
+  ~RtApiSocket();
+  RtAudio::Api getCurrentApi() { return RtAudio::RTAUDIO_SOCKET; }
+  unsigned int getDeviceCount( void );
+  RtAudio::DeviceInfo getDeviceInfo( unsigned int device );
+  void closeStream( void );
+  void startStream( void );
+  void stopStream( void );
+  void abortStream( void );
+
+  // This function is intended for internal use only.  It must be
+  // public because it is called by the internal callback handler,
+  // which is not a member of RtAudio.  External use of this function
+  // will most likely produce highly undesireable results!
+  void callbackEvent( void );
+
+  private:
+
+  bool probeDeviceOpen( unsigned int device, StreamMode mode, unsigned int channels,
+                        unsigned int firstChannel, unsigned int sampleRate,
+                        RtAudioFormat format, unsigned int *bufferSize,
+                        RtAudio::StreamOptions *options );
+};
+
+#endif
+
+
 #if defined(__RTAUDIO_DUMMY__)
 
 class RtApiDummy: public RtApi
@@ -1048,9 +1090,9 @@ public:
   void stopStream( void ) {}
   void abortStream( void ) {}
 
-  private:
+private:
 
-  bool probeDeviceOpen( unsigned int /*device*/, StreamMode /*mode*/, unsigned int /*channels*/, 
+  bool probeDeviceOpen( unsigned int /*device*/, StreamMode /*mode*/, unsigned int /*channels*/,
                         unsigned int /*firstChannel*/, unsigned int /*sampleRate*/,
                         RtAudioFormat /*format*/, unsigned int * /*bufferSize*/,
                         RtAudio::StreamOptions * /*options*/ ) { return false; }

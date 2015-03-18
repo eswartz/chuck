@@ -71,6 +71,12 @@ extern CHUCK_THREAD g_tid_whatever;
 // flag for providing Std.system( string )
 extern t_CKBOOL g_enable_system_cmd;
 
+#ifdef __RTAUDIO_SOCKET__
+// read/write sockets
+extern t_CKINT g_wport;
+extern t_CKINT g_rport;
+
+#endif
 
 // global detach
 extern "C" void all_detach();

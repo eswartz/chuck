@@ -72,7 +72,12 @@ CHUCK_THREAD g_tid_whatever = 0;
 // flag for Std.system( string )
 t_CKBOOL g_enable_system_cmd = FALSE;
 
+#ifdef __RTAUDIO_SOCKET__
+// read/write sockets
+t_CKINT g_wport = 10000;
+t_CKINT g_rport = 10001;
 
+#endif
 
 
 //-----------------------------------------------------------------------------

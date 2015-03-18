@@ -790,7 +790,7 @@ void RtMidiOut :: sendMessage( std::vector<unsigned char> *message )
 //   - http://www.alsa-project.org/documentation.php#Library
 
 // chuck
-#if defined(__LINUX_ALSASEQ__) || defined(__PLATFORM_LINUX__)
+#if (defined(__LINUX_ALSASEQ__) || defined(__PLATFORM_LINUX__)) && !defined(__DISABLE_MIDI__)
 
 // The ALSA Sequencer API is based on the use of a callback function for
 // MIDI input.
@@ -2232,7 +2232,7 @@ void RtMidiOut :: sendMessage( std::vector<unsigned char> *message )
 #endif  // __WINDOWS_MM__
 
 
-#if defined(__LINUX_OSS__)  // dummy
+#if defined(__LINUX_OSS__) || defined(__DISABLE_MIDI__) // dummy
 
 /*void midiInputCallback( const MIDIPacketList *list, void *procRef, void *srcRef )
 {

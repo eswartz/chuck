@@ -4,7 +4,7 @@ DESTDIR?=/usr/bin
 current: 
 	@echo "[chuck build]: please use one of the following configurations:"
 	@echo "   make linux-alsa, make linux-jack, make linux-pulse,"
-	@echo "   make osx, make osx-ub, make cygwin, or make win32"
+	@echo "   make osx, make osx-ub, make cygwin, make win32, or make psocket"
 
 install:
 	mkdir -p $(DESTDIR)
@@ -19,7 +19,7 @@ endif
 endif
 
 .PHONY: osx linux-pulse linux-jack linux-alsa cygwin osx-rl
-osx linux-pulse linux-jack linux-alsa cygwin osx-rl: chuck
+osx linux-pulse linux-jack linux-alsa cygwin psocket osx-rl: chuck
 
 win32:
 	make -f makefile.win32
@@ -70,6 +70,10 @@ endif
 
 ifneq (,$(strip $(filter cygwin,$(MAKECMDGOALS))))
 include makefile.cygwin
+endif
+
+ifneq (,$(strip $(filter psocket,$(MAKECMDGOALS))))
+include makefile.psocket
 endif
 
 ifneq (,$(strip $(filter osx-rl,$(MAKECMDGOALS))))

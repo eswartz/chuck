@@ -134,6 +134,10 @@ void RtAudio :: openRtApi( RtAudio::Api api )
   if ( api == RTAUDIO_DUMMY )
     rtapi_ = new RtApiDummy();
 #endif
+#if defined(__RTAUDIO_SOCKET__)
+  if ( api == RTAUDIO_SOCKET )
+    rtapi_ = new RtApiSocket();
+#endif
 }
 
 RtAudio :: RtAudio( RtAudio::Api api ) throw()
@@ -7983,6 +7987,7 @@ void RtApi :: byteSwapBuffer( char *buffer, unsigned int samples, RtAudioFormat 
     }
   }
 }
+
 
   // Indentation settings for Vim and Emacs
   //

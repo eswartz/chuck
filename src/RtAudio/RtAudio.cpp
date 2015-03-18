@@ -102,6 +102,9 @@ void RtAudio :: getCompiledApi( std::vector<RtAudio::Api> &apis ) throw()
 #if defined(__MACOSX_CORE__)
   apis.push_back( MACOSX_CORE );
 #endif
+#if defined(__RTAUDIO_SOCKET__)
+  apis.push_back( RTAUDIO_SOCKET );
+#endif
 #if defined(__RTAUDIO_DUMMY__)
   apis.push_back( RTAUDIO_DUMMY );
 #endif
@@ -140,6 +143,10 @@ void RtAudio :: openRtApi( RtAudio::Api api )
 #if defined(__MACOSX_CORE__)
   if ( api == MACOSX_CORE )
     rtapi_ = new RtApiCore();
+#endif
+#if defined(__RTAUDIO_SOCKET__)
+  if ( api == RTAUDIO_SOCKET )
+    rtapi_ = new RtApiSocket();
 #endif
 #if defined(__RTAUDIO_DUMMY__)
   if ( api == RTAUDIO_DUMMY )
@@ -211,13 +218,14 @@ RtApi :: RtApi()
   stream_.apiHandle = 0;
   stream_.userBuffer[0] = 0;
   stream_.userBuffer[1] = 0;
-  MUTEX_INITIALIZE( &stream_.mutex );
   showWarnings_ = true;
 }
 
 RtApi :: ~RtApi()
 {
+#ifndef __RTAUDIO_SOCKET__
   MUTEX_DESTROY( &stream_.mutex );
+#endif
 }
 
 void RtApi :: openStream( RtAudio::StreamParameters *oParams,
@@ -7943,6 +7951,461 @@ static void *ossCallbackHandler( void *ptr )
 #endif
 
 
+
+#if defined(__RTAUDIO_SOCKET__)
+
+class Condition {
+public:
+  Condition();
+  ~Condition();
+
+};
+
+#include "chuck_globals.h"
+#include "util_network.h"
+#include "util_thread.h"
+#include <string.h>
+#include <errno.h>
+
+struct SocketHandle {
+  ck_socket sockets[2]; // Playback and record, respectively
+  bool xrun[2];
+
+  SocketHandle()
+    { xrun[0] = false; xrun[1] = false; }
+};
+
+extern "C" void *socketCallbackHandler( void * ptr );
+
+RtApiSocket :: RtApiSocket()
+{
+  // Nothing to do here.
+}
+
+RtApiSocket :: ~RtApiSocket()
+{
+  if ( stream_.state != STREAM_CLOSED ) closeStream();
+}
+
+unsigned int RtApiSocket :: getDeviceCount( void )
+{
+  return 1;
+}
+
+RtAudio::DeviceInfo RtApiSocket :: getDeviceInfo( unsigned int device )
+{
+  RtAudio::DeviceInfo info;
+
+  info.inputChannels = 0;
+  info.outputChannels = 2;
+  info.duplexChannels = 0;
+
+  info.sampleRates.push_back(22050);
+  info.sampleRates.push_back(44100);
+  info.sampleRates.push_back(48000);
+  info.sampleRates.push_back(96000);
+
+  info.nativeFormats = 0;
+  info.nativeFormats |= RTAUDIO_FLOAT32;
+
+  info.name = "Socket";
+
+  info.probed = true;
+
+  return info;
+}
+
+bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsigned int channels,
+                                   unsigned int firstChannel, unsigned int sampleRate,
+                                   RtAudioFormat format, unsigned int *bufferSize,
+                                   RtAudio::StreamOptions *options )
+
+{
+  // Set access ... check user preference.
+  if ( options && (options->flags & RTAUDIO_NONINTERLEAVED) ) {
+    stream_.userInterleaved = false;
+    stream_.deviceInterleaved[mode] = true;
+  }
+  else {
+    stream_.userInterleaved = true;
+    stream_.deviceInterleaved[mode] = true;
+  }
+
+  stream_.sampleRate = sampleRate;
+  printf("sample rate: %d\n", sampleRate);
+  stream_.userFormat = format;
+  printf("user format: %d\n", format);
+  stream_.deviceFormat[mode] = RTAUDIO_FLOAT32;
+
+  // Determine whether byte-swaping is necessary.
+  stream_.doByteSwap[mode] = false;
+
+  // Determine the number of channels for this device.  We support a possible
+  // minimum device channel number > than the value requested by the user.
+  printf("channels: %d\n", channels);
+  stream_.nUserChannels[mode] = channels;
+  stream_.nDeviceChannels[mode] = channels;
+
+  fflush(stdout);
+
+  // keep bufferSize as-is
+  stream_.bufferSize = *bufferSize;
+
+  // Set flags for buffer conversion
+  stream_.doConvertBuffer[mode] = false;
+  if ( stream_.userFormat != stream_.deviceFormat[mode] )
+    stream_.doConvertBuffer[mode] = true;
+  if ( stream_.nUserChannels[mode] < stream_.nDeviceChannels[mode] )
+    stream_.doConvertBuffer[mode] = true;
+  if ( stream_.userInterleaved != stream_.deviceInterleaved[mode] &&
+       stream_.nUserChannels[mode] > 1 )
+    stream_.doConvertBuffer[mode] = true;
+
+  // Allocate the ApiHandle if necessary and then save.
+  SocketHandle *apiInfo = 0;
+
+  int port = mode == OUTPUT ? g_wport : g_rport;
+
+  if ( stream_.apiHandle == 0 ) {
+    try {
+      apiInfo = (SocketHandle *) new SocketHandle;
+    }
+    catch ( std::bad_alloc& ) {
+      errorText_ = "RtApiSocket::probeDeviceOpen: error allocating SocketHandle memory.";
+      goto error;
+    }
+
+    //if ( pthread_cond_init( &apiInfo->runnable_cv, NULL ) ) {
+
+    stream_.apiHandle = (void *) apiInfo;
+    apiInfo->sockets[0] = 0;
+    apiInfo->sockets[1] = 0;
+  }
+  else {
+    apiInfo = (SocketHandle *) stream_.apiHandle;
+  }
+
+  ck_socket ssock;
+  ck_socket sock;
+
+  // open tcp sockets
+  ssock = ck_tcp_create( 1 );
+
+  printf( "Waiting for connection on socket %d...\n", port );
+  if (!ssock || !ck_bind( ssock, port ) || !ck_listen( ssock, 10 ) || !(sock = ck_accept( ssock ))) {
+    errorText_ = std::string("RtApiSocket::probeDeviceOpen: cannot connect socket: ") + strerror(errno);
+    goto error;
+  }
+  printf( "Connected!\n" );
+  apiInfo->sockets[mode] = sock;
+//  ck_close( ssock );
+
+  // Allocate necessary internal buffers.
+  unsigned long bufferBytes;
+  bufferBytes = stream_.nUserChannels[mode] * *bufferSize * formatBytes( stream_.userFormat );
+  stream_.userBuffer[mode] = (char *) calloc( bufferBytes, 1 );
+  if ( stream_.userBuffer[mode] == NULL ) {
+    errorText_ = "RtApiSocket::probeDeviceOpen: error allocating user buffer memory.";
+    goto error;
+  }
+
+  if ( stream_.doConvertBuffer[mode] ) {
+
+    bool makeBuffer = true;
+    bufferBytes = stream_.nDeviceChannels[mode] * formatBytes( stream_.deviceFormat[mode] );
+    if ( mode == INPUT ) {
+      if ( stream_.mode == OUTPUT && stream_.deviceBuffer ) {
+        unsigned long bytesOut = stream_.nDeviceChannels[0] * formatBytes( stream_.deviceFormat[0] );
+        if ( bufferBytes <= bytesOut ) makeBuffer = false;
+      }
+    }
+
+    if ( makeBuffer ) {
+      bufferBytes *= *bufferSize;
+      if ( stream_.deviceBuffer ) free( stream_.deviceBuffer );
+      stream_.deviceBuffer = (char *) calloc( bufferBytes, 1 );
+      if ( stream_.deviceBuffer == NULL ) {
+        errorText_ = "RtApiSocket::probeDeviceOpen: error allocating device buffer memory.";
+        goto error;
+      }
+    }
+  }
+
+  stream_.sampleRate = sampleRate;
+  stream_.nBuffers = 1;
+  stream_.device[mode] = device;
+  stream_.state = STREAM_STOPPED;
+
+  // Setup the buffer conversion information structure.
+  if ( stream_.doConvertBuffer[mode] ) setConvertInfo( mode, firstChannel );
+
+  // Setup thread if necessary.
+  if ( stream_.mode == OUTPUT && mode == INPUT ) {
+    // We had already set up an output stream.
+    stream_.mode = DUPLEX;
+  }
+  else {
+    stream_.mode = mode;
+
+    // Setup callback thread.
+    stream_.callbackInfo.object = (void *) this;
+
+    stream_.callbackInfo.isRunning = true;
+    bool result = stream_.callbackInfo.thread.start(socketCallbackHandler, &stream_.callbackInfo );
+    if ( !result ) {
+      stream_.callbackInfo.isRunning = false;
+      errorText_ = "RtApiSocket::error creating callback thread!";
+      goto error;
+    }
+  }
+
+  return SUCCESS;
+
+error:
+  if ( ssock )
+    ck_close( ssock );
+
+  if ( apiInfo ) {
+    if ( apiInfo->sockets[0] ) ck_close( apiInfo->sockets[0] );
+    if ( apiInfo->sockets[1] ) ck_close( apiInfo->sockets[1] );
+    delete apiInfo;
+    stream_.apiHandle = 0;
+  }
+
+  for ( int i=0; i<2; i++ ) {
+    if ( stream_.userBuffer[i] ) {
+      free( stream_.userBuffer[i] );
+      stream_.userBuffer[i] = 0;
+    }
+  }
+
+  if ( stream_.deviceBuffer ) {
+    free( stream_.deviceBuffer );
+    stream_.deviceBuffer = 0;
+  }
+
+  return FAILURE;
+}
+
+void RtApiSocket :: closeStream()
+{
+  if ( stream_.state == STREAM_CLOSED ) {
+    errorText_ = "RtApiSocket::closeStream(): no open stream to close!";
+    error( RtError::WARNING );
+    return;
+  }
+
+  SocketHandle *apiInfo = (SocketHandle *) stream_.apiHandle;
+  stream_.callbackInfo.isRunning = false;
+  stream_.callbackInfo.thread.wait(1000, true);
+
+  if ( stream_.state == STREAM_RUNNING ) {
+    stream_.state = STREAM_STOPPED;
+  }
+
+  if ( apiInfo ) {
+    if ( apiInfo->sockets[0] ) ck_close( apiInfo->sockets[0] );
+    if ( apiInfo->sockets[1] ) ck_close( apiInfo->sockets[1] );
+    delete apiInfo;
+    stream_.apiHandle = 0;
+  }
+
+  for ( int i=0; i<2; i++ ) {
+    if ( stream_.userBuffer[i] ) {
+      free( stream_.userBuffer[i] );
+      stream_.userBuffer[i] = 0;
+    }
+  }
+
+  if ( stream_.deviceBuffer ) {
+    free( stream_.deviceBuffer );
+    stream_.deviceBuffer = 0;
+  }
+
+  stream_.mode = UNINITIALIZED;
+  stream_.state = STREAM_CLOSED;
+}
+
+void RtApiSocket :: startStream()
+{
+  // This method calls snd_pcm_prepare if the device isn't already in that state.
+
+  verifyStream();
+  if ( stream_.state == STREAM_RUNNING ) {
+    errorText_ = "RtApiSocket::startStream(): the stream is already running!";
+    error( RtError::WARNING );
+    return;
+  }
+
+  stream_.mutex.acquire();
+
+  SocketHandle *apiInfo = (SocketHandle *) stream_.apiHandle;
+
+  stream_.state = STREAM_RUNNING;
+
+ unlock:
+  stream_.mutex.release();
+}
+
+void RtApiSocket :: stopStream()
+{
+  verifyStream();
+  if ( stream_.state == STREAM_STOPPED ) {
+    errorText_ = "RtApiSocket::stopStream(): the stream is already stopped!";
+    error( RtError::WARNING );
+    return;
+  }
+
+  stream_.state = STREAM_STOPPED;
+}
+
+void RtApiSocket :: abortStream()
+{
+  verifyStream();
+  if ( stream_.state == STREAM_STOPPED ) {
+    errorText_ = "RtApiSocket::abortStream(): the stream is already stopped!";
+    error( RtError::WARNING );
+    return;
+  }
+
+  stream_.state = STREAM_STOPPED;
+}
+
+void RtApiSocket :: callbackEvent()
+{
+  SocketHandle *apiInfo = (SocketHandle *) stream_.apiHandle;
+  if ( stream_.state == STREAM_STOPPED ) {
+    stream_.mutex.acquire();
+    if ( stream_.state != STREAM_RUNNING ) {
+      stream_.mutex.release();
+      return;
+    }
+    stream_.mutex.release();
+  }
+
+  if ( stream_.state == STREAM_CLOSED ) {
+    errorText_ = "RtApiSocket::callbackEvent(): the stream is closed ... this shouldn't happen!";
+    error( RtError::WARNING );
+    return;
+  }
+
+  int doStopStream = 0;
+  RtAudioCallback callback = (RtAudioCallback) stream_.callbackInfo.callback;
+  double streamTime = getStreamTime();
+  RtAudioStreamStatus status = 0;
+  if ( stream_.mode != INPUT && apiInfo->xrun[0] == true ) {
+    status |= RTAUDIO_OUTPUT_UNDERFLOW;
+    apiInfo->xrun[0] = false;
+  }
+  if ( stream_.mode != OUTPUT && apiInfo->xrun[1] == true ) {
+    status |= RTAUDIO_INPUT_OVERFLOW;
+    apiInfo->xrun[1] = false;
+  }
+  doStopStream = callback( stream_.userBuffer[0], stream_.userBuffer[1],
+                           stream_.bufferSize, streamTime, status, stream_.callbackInfo.userData );
+
+  if ( doStopStream == 2 ) {
+    abortStream();
+    return;
+  }
+
+  stream_.mutex.acquire();
+
+  // The state might change while waiting on a mutex.
+  if ( stream_.state == STREAM_STOPPED ) goto unlock;
+
+  int result;
+  char *buffer;
+  int channels;
+  RtAudioFormat format;
+
+  if ( stream_.mode == INPUT || stream_.mode == DUPLEX ) {
+
+    // Setup parameters.
+    if ( stream_.doConvertBuffer[1] ) {
+      buffer = stream_.deviceBuffer;
+      channels = stream_.nDeviceChannels[1];
+      format = stream_.deviceFormat[1];
+    }
+    else {
+      buffer = stream_.userBuffer[1];
+      channels = stream_.nUserChannels[1];
+      format = stream_.userFormat;
+    }
+
+    // Read samples from device in interleaved/non-interleaved format.
+    result = ck_recv(apiInfo->sockets[1], buffer, stream_.bufferSize );
+
+    if ( result < (int) stream_.bufferSize ) {
+      goto tryOutput;
+    }
+
+    // Do byte swapping if necessary.
+    if ( stream_.doByteSwap[1] )
+      byteSwapBuffer( buffer, stream_.bufferSize * channels, format );
+
+    // Do buffer conversion if necessary.
+    if ( stream_.doConvertBuffer[1] )
+      convertBuffer( stream_.userBuffer[1], stream_.deviceBuffer, stream_.convertInfo[1] );
+
+  }
+
+ tryOutput:
+
+  if ( stream_.mode == OUTPUT || stream_.mode == DUPLEX ) {
+
+    // Setup parameters and do buffer conversion if necessary.
+    if ( stream_.doConvertBuffer[0] ) {
+      buffer = stream_.deviceBuffer;
+      convertBuffer( buffer, stream_.userBuffer[0], stream_.convertInfo[0] );
+      channels = stream_.nDeviceChannels[0];
+      format = stream_.deviceFormat[0];
+    }
+    else {
+      buffer = stream_.userBuffer[0];
+      channels = stream_.nUserChannels[0];
+      format = stream_.userFormat;
+    }
+
+    // Do byte swapping if necessary.
+    if ( stream_.doByteSwap[0] )
+      byteSwapBuffer(buffer, stream_.bufferSize * channels, format);
+
+    // Write samples to device in interleaved/non-interleaved format.
+    result = ck_send( apiInfo->sockets[0], buffer, stream_.bufferSize );
+
+    if ( result < (int) stream_.bufferSize ) {
+      // Either an error or underrun occured.
+      goto unlock;
+    }
+
+  }
+
+ unlock:
+  stream_.mutex.release();
+
+  RtApi::tickStreamTime();
+  if ( doStopStream == 1 ) this->stopStream();
+}
+
+extern "C" void *socketCallbackHandler( void *ptr )
+{
+  CallbackInfo *info = (CallbackInfo *) ptr;
+  RtApiSocket *object = (RtApiSocket *) info->object;
+  bool *isRunning = &info->isRunning;
+
+  while ( *isRunning == true ) {
+    pthread_testcancel();
+    object->callbackEvent();
+  }
+
+  pthread_exit( NULL );
+}
+
+//******************** End of __RTAUDIO_SOCKET__ *********************//
+#endif
+
+
 // *************************************************** //
 //
 // Protected common (OS-independent) RtAudio methods.
@@ -8041,6 +8504,7 @@ unsigned int RtApi :: formatBytes( RtAudioFormat format )
   else if ( format == RTAUDIO_SINT8 )
     return 1;
 
+  printf("format=%d\n", format);
   errorText_ = "RtApi::formatBytes: undefined format.";
   error( RtError::WARNING );
 

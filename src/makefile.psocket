@@ -1,0 +1,4 @@
+
+CFLAGS+= -D__RTAUDIO_SOCKET__ -D__PLATFORM_LINUX__ -D__DISABLE_MIDI__ -g -fno-strict-aliasing -D__CK_SNDFILE_NATIVE__
+LDFLAGS+= -lstdc++ -ldl -lm -lsndfile -lpthread -g
+
