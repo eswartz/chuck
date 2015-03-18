@@ -45,6 +45,7 @@
 #include "ulib_std.h"
 #include "ulib_opsc.h"
 #include "ulib_regex.h"
+#include "ulib_net.h"
 #include "chuck_io.h"
 
 #if defined(__PLATFORM_WIN32__)
@@ -593,7 +594,10 @@ t_CKBOOL load_internal_modules( Chuck_Compiler * compiler )
     
     if( !init_class_HID( env ) ) goto error;
     if( !init_class_serialio( env ) ) goto error;
-        
+
+    EM_log( CK_LOG_SEVERE, "module net..." );
+    load_module( env, net_query, "net", "global" );
+
     // clear context
     type_engine_unload_context( env );
     
