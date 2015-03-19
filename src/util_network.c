@@ -137,9 +137,11 @@ ck_socket ck_tcp_create( int flags )
     sock->sock = socket( AF_INET, SOCK_STREAM, 0 );
     sock->prot = SOCK_STREAM;
 
-    if( flags )
+    if( flags ) {
         setsockopt( sock->sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&ru, sizeof(ru) );
-    // setsockopt( sock->sock, SOL_SOCKET, SO_REUSEPORT, (const char *)&ru, sizeof(ru) );
+        if (flags > 1)
+            setsockopt( sock->sock, SOL_SOCKET, SO_REUSEPORT, (const char *)&ru, sizeof(ru) );
+    }
     setsockopt( sock->sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&nd, sizeof(nd) );
 
     return sock;
