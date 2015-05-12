@@ -71,8 +71,10 @@ public:
   }
 
   ck_socket ensure(int port) {
+    // n.b. 0 should never find a hit
     SocketMap::iterator it = m_sockets.find(port);
     if (it != m_sockets.end()) {
+      assert(!port);
       cerr << "[chuck](via netout): added client for port "<< port << endl;
       it->second.second.clients++;
       return it->second.second.sock;
@@ -82,21 +84,28 @@ public:
     ck_socket ssock = ck_tcp_create( 1 );
 
     if (!ssock || !ck_bind( ssock, port ) || !ck_listen( ssock, 10 )) {
-      cerr << "[chuck](via netout): error: cannot bind to port '" << port << "'"
+      cerr << "[chuck](via netout): error: cannot bind to port '" << port << "'; "
             << strerror(errno)
               << endl;
       return NULL;
     }
 
+    // update port
+    if (port == 0 && !ck_get_port( ssock, &port )) {
+      cerr << "[chuck](via netout): error: failed to fetch actual port "
+            << strerror(errno)
+              << endl;
+    }
+
     ck_socket sock = 0;
-    cerr << "[chuck](via netout) Waiting for connection on socket " << port << "..." << endl;
+    cerr << "[chuck](via netout) Waiting for connection on port " << port << "..." << endl;
+    cerr.flush();
     if (!(sock = ck_accept( ssock ))) {
-      cerr << "[chuck](via netout): error: cannot accept to port '" << port << "'"
+      cerr << "[chuck](via netout): error: cannot accept to port '" << port << "'; "
             << strerror(errno)
               << endl;
       return FALSE;
     }
-    cerr << "[chuck](via netout) Connected!" << endl;
 
     // remember we're connected
     std::pair<ck_socket, GigaClient> info (ssock, GigaClient(sock));
@@ -366,15 +375,17 @@ GigaSend::~GigaSend() {
 // desc: ...
 //-----------------------------------------------------------------------------
 t_CKBOOL GigaSend::connect(const char * hostname, int port) {
-  if (m_sock || port == 0)
+  if (m_sock)
     return FALSE;
 
+  // remember initial choice
+  m_hostname = hostname;
+  m_port = port;
+
+  // if port is 0, this updates it
   m_sock = s_server->ensure(port);
   if (!m_sock)
     return FALSE;
-
-  m_hostname = hostname;
-  m_port = port;
 
   return TRUE;
 }

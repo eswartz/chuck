@@ -139,7 +139,7 @@ ck_socket ck_tcp_create( int flags )
 
     if( flags )
         setsockopt( sock->sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&ru, sizeof(ru) );
-    // setsockopt( sock->sock, SOL_SOCKET, SO_REUSEPORT, (const char *)&ru, sizeof(ru) );
+    setsockopt( sock->sock, SOL_SOCKET, SO_REUSEPORT, (const char *)&ru, sizeof(ru) );
     setsockopt( sock->sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&nd, sizeof(nd) );
 
     return sock;
@@ -233,6 +233,28 @@ t_CKBOOL ck_bind( ck_socket sock, int port )
 }
 
 
+
+//-----------------------------------------------------------------------------
+// name: ck_get_port()
+// desc: get the port to which a socket is bound
+//-----------------------------------------------------------------------------
+t_CKBOOL ck_get_port( ck_socket sock, int * port )
+{
+    int ret;
+
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+
+    ret = getsockname( sock->sock, (struct sockaddr*) &addr,
+        &len);
+
+    if (ret >= 0)
+      *port = ntohs(addr.sin_port);
+    else
+      *port = 0;
+
+    return ( ret >= 0 );
+}
 
 
 //-----------------------------------------------------------------------------

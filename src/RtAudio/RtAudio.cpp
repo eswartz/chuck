@@ -46,6 +46,11 @@
 #include <cstring>
 #include <climits>
 
+// HACK
+#ifdef __RTAUDIO_SOCKET__
+#undef __MACOSX_CORE__
+#endif
+
 // Static variable definitions.
 const unsigned int RtApi::MAX_SAMPLE_RATES = 14;
 const unsigned int RtApi::SAMPLE_RATES[] = {
@@ -8069,6 +8074,8 @@ bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsig
     stream_.apiHandle = (void *) apiInfo;
     apiInfo->sockets[0] = 0;
     apiInfo->sockets[1] = 0;
+    apiInfo->ssockets[0] = 0;
+    apiInfo->ssockets[1] = 0;
   }
   else {
     apiInfo = (SocketHandle *) stream_.apiHandle;
@@ -8079,6 +8086,7 @@ bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsig
 
   // open tcp sockets
   ssock = ck_tcp_create( 1 );
+
 
   printf( "Waiting for connection on socket %d...\n", port );
   if (!ssock || !ck_bind( ssock, port ) || !ck_listen( ssock, 10 ) || !(sock = ck_accept( ssock ))) {

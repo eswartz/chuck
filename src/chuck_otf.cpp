@@ -583,7 +583,8 @@ int otf_send_cmd( int argc, const char ** argv, t_CKINT & i, const char * host, 
     }
     else
     {
-        fprintf( stderr, "[chuck]: remote operation timed out...\n" );
+        fprintf( stderr, "[chuck]: remote operation failed... (%s)\n",
+            strerror(errno) );
     }
     // close the sock
     ck_close( dest );

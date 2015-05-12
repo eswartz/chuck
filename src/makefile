@@ -18,8 +18,8 @@ MAKECMDGOALS:=$(.DEFAULT_GOAL)
 endif
 endif
 
-.PHONY: osx linux-pulse linux-jack linux-alsa cygwin psocket psocket-win32 mingw osx-rl
-osx linux-pulse linux-jack linux-alsa cygwin psocket psocket-win32 mingw osx-rl: chuck
+.PHONY: osx linux-pulse linux-jack linux-alsa cygwin psocket psocket-win32 psocket-osx mingw osx-rl
+osx linux-pulse linux-jack linux-alsa cygwin psocket psocket-win32 psocket-osx mingw osx-rl: chuck
 
 win32:
 	make -f makefile.win32
@@ -82,6 +82,10 @@ endif
 
 ifneq (,$(strip $(filter psocket-win32,$(MAKECMDGOALS))))
 include makefile.psocket.win32
+endif
+
+ifneq (,$(strip $(filter psocket-osx,$(MAKECMDGOALS))))
+include makefile.psocket.osx
 endif
 
 ifneq (,$(strip $(filter osx-rl,$(MAKECMDGOALS))))

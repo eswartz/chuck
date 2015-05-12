@@ -65,6 +65,8 @@ t_CKBOOL ck_connect2( ck_socket sock, const struct sockaddr * serv_addr,
                       int addrlen);
 // bind to a port
 t_CKBOOL ck_bind( ck_socket sock, int port );
+// get actual port bound
+t_CKBOOL ck_get_port( ck_socket sock, int * port );
 // listen (TCP)
 t_CKBOOL ck_listen( ck_socket sock, int backlog );
 // accept (TCP)
