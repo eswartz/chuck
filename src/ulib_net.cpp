@@ -130,7 +130,7 @@ private:
   // name: server_thread(...)
   // desc: manage incoming connections
   //-----------------------------------------------------------------------------
-  static void* THREAD_TYPE server_thread(void* arg) {
+  static THREAD_RETURN THREAD_TYPE server_thread(void* arg) {
     GigaServerSocket *server = (GigaServerSocket*) arg;
 
     while (true) {
@@ -147,7 +147,7 @@ private:
       usleep(50000);
     }
 
-    return NULL;
+    return 0;
   }
 
 private:

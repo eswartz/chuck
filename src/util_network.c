@@ -371,8 +371,13 @@ t_CKBOOL ck_set_nonblocking( ck_socket sock )
       return FALSE;
 
     int one = 1;
+#ifdef _WIN32
+    if (ioctlsocket( sock->sock, FIONBIO, &one))
+      return FALSE;
+#else
     if (ioctl( sock->sock, FIONBIO, &one))
       return FALSE;
+#endif
 
     return TRUE;
 
@@ -396,8 +401,16 @@ int ck_send( ck_socket sock, const char * buffer, int len )
     {
        ret = send( sock->sock, p, togo, 0 );
        if( ret < 0 ) {
+#ifdef _WIN32
+         if (ret == SOCKET_ERROR) {
+           errno = WSAGetLastError();
+           if (errno == WSAEWOULDBLOCK)
+             continue;
+         }
+#else
          if (errno == EAGAIN)
            continue;
+#endif
          return -1;    // negative is an error message
        }
        if( ret == 0 ) return len - togo; // zero is end-of-transmission

@@ -1,6 +1,6 @@
 
-CFLAGS+= -D__PLATFORM_WIN32__ -g -fno-strict-aliasing -D__WINDOWS_DS__
-LDFLAGS+= -lstdc++ -ldl -lm  -g -ldinput -ldsound -ldxguid -luser32 -lws2_32 -lwinmm -lole32
+CFLAGS+= -Iwin32 -D__PLATFORM_WIN32__ -D_WIN32_WINNT=0x0501 -g -fno-strict-aliasing -D__WINDOWS_DS__
+LDFLAGS+= -lstdc++ -lpthread -lm  -g -ldinput -ldsound -ldxguid -luser32 -lws2_32 -lwinmm -lole32
 CSRCS+= util_sndfile.c
 
 CXXSRCS -= ulib_regex.cpp
