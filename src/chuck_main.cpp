@@ -956,6 +956,13 @@ static void usage()
         }
         else
         {
+            if (g_port == 0) {
+                // discover the actual port
+                int p;
+                ck_get_port( g_sock, &p );
+                g_port = p;
+                EM_log( CK_LOG_SYSTEM, "started listener on port: %d...", g_port );
+            }
     #if !defined(__PLATFORM_WIN32__) || defined(__WINDOWS_PTHREAD__)
             pthread_create( &g_tid_otf, NULL, otf_cb, NULL );
     #else
