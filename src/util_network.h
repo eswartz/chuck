@@ -65,10 +65,20 @@ t_CKBOOL ck_connect2( ck_socket sock, const struct sockaddr * serv_addr,
                       int addrlen);
 // bind to a port
 t_CKBOOL ck_bind( ck_socket sock, int port );
+// get actual port bound
+t_CKBOOL ck_get_port( ck_socket sock, int * port );
 // listen (TCP)
 t_CKBOOL ck_listen( ck_socket sock, int backlog );
 // accept (TCP)
 ck_socket ck_accept( ck_socket sock );
+// set non-blocking
+t_CKBOOL ck_set_nonblocking( ck_socket sock );
+
+// tell if the given socket has any activity via select();
+// return number of relevant entries;
+// clear entries in the array that aren't active, leaving sparse array
+typedef enum t_select { READ, WRITE } t_select;
+int ck_select( ck_socket* socks, t_CKUINT nsocks, t_select type, long sec, long usec );
 
 // send
 int ck_send( ck_socket sock, const char * buffer, int len );

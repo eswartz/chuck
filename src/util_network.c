@@ -49,8 +49,10 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/ioctl.h>
 #endif
 
+#include <errno.h>
 
 
 
@@ -234,6 +236,28 @@ t_CKBOOL ck_bind( ck_socket sock, int port )
 
 
 
+//-----------------------------------------------------------------------------
+// name: ck_get_port()
+// desc: get the port to which a socket is bound
+//-----------------------------------------------------------------------------
+t_CKBOOL ck_get_port( ck_socket sock, int * port )
+{
+    int ret;
+
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+
+    ret = getsockname( sock->sock, (struct sockaddr*) &addr,
+        &len);
+
+    if (ret >= 0)
+      *port = ntohs(addr.sin_port);
+    else
+      *port = 0;
+
+    return ( ret >= 0 );
+}
+
 
 //-----------------------------------------------------------------------------
 // name: ck_listen()
@@ -283,6 +307,84 @@ error:
 
 
 
+//-----------------------------------------------------------------------------
+// name: ck_select()
+// desc: ...
+//-----------------------------------------------------------------------------
+// tell if the given socket has any activity via select();
+// return number of relevant entries;
+// clear entries in the array that aren't active, leaving sparse array
+int ck_select( ck_socket* socks, t_CKUINT nsocks, t_select type, long sec, long usec )
+{
+    fd_set readfds, writefds, exceptfds;
+    FD_ZERO(&readfds);
+    FD_ZERO(&writefds);
+    FD_ZERO(&exceptfds);
+
+    int maxfd = 0;
+    t_CKUINT i;
+    for (i = 0; i < nsocks; i++) {
+      int fd = socks[i]->sock;
+      if (!fd)
+        continue;
+      if (fd > maxfd) maxfd = fd;
+
+      if (type == READ)
+        FD_SET(fd, &readfds);
+      if (type == WRITE)
+        FD_SET(fd, &writefds);
+      FD_SET(fd, &exceptfds);
+    }
+
+    struct timeval timeout;
+    timeout.tv_sec = sec;
+    timeout.tv_usec = usec;
+
+    int ret = select(maxfd + 1, &readfds, &writefds, &exceptfds, &timeout);
+    if (ret <= 0) {
+      memset(socks, 0, sizeof(ck_socket*) * nsocks);
+      return ret;
+    }
+
+    for (i = 0; i < nsocks; i++) {
+      int fd = socks[i]->sock;
+      if (FD_ISSET(fd, &readfds)
+          || FD_ISSET(fd, &writefds)
+          || FD_ISSET(fd, &exceptfds)) {
+        // good
+      } else {
+        socks[i] = NULL;
+      }
+    }
+
+    return ret;
+}
+
+
+//-----------------------------------------------------------------------------
+// name: ck_set_nonblocking()
+// desc: ...
+//-----------------------------------------------------------------------------
+t_CKBOOL ck_set_nonblocking( ck_socket sock )
+{
+    if (!sock)
+      return FALSE;
+
+    int one = 1;
+#ifdef _WIN32
+    if (ioctlsocket( sock->sock, FIONBIO, &one))
+      return FALSE;
+#else
+    if (ioctl( sock->sock, FIONBIO, &one))
+      return FALSE;
+#endif
+
+    return TRUE;
+
+}
+
+
+
 
 //-----------------------------------------------------------------------------
 // name: ck_send()
@@ -290,7 +392,32 @@ error:
 //-----------------------------------------------------------------------------
 int ck_send( ck_socket sock, const char * buffer, int len ) 
 {
-    return send( sock->sock, buffer, len, 0 );
+    //return send( sock->sock, buffer, len, 0 );
+
+    int ret;
+    int togo = len;
+    char * p = buffer;
+    while( togo > 0 )
+    {
+       ret = send( sock->sock, p, togo, 0 );
+       if( ret < 0 ) {
+#ifdef _WIN32
+         if (ret == SOCKET_ERROR) {
+           errno = WSAGetLastError();
+           if (errno == WSAEWOULDBLOCK)
+             continue;
+         }
+#else
+         if (errno == EAGAIN)
+           continue;
+#endif
+         return -1;    // negative is an error message
+       }
+       if( ret == 0 ) return len - togo; // zero is end-of-transmission
+       togo -= ret;
+       p += ret;
+    }
+    return len;
 }
 
 
@@ -347,6 +474,9 @@ int ck_recvfrom( ck_socket sock, char * buffer, int len,
 //-----------------------------------------------------------------------------
 int ck_recv( ck_socket sock, char * buffer, int len ) 
 {
+    if (!sock)
+      return -1;
+
     if( sock->prot == SOCK_STREAM )
     {
         int ret;
@@ -355,7 +485,7 @@ int ck_recv( ck_socket sock, char * buffer, int len )
         while( togo > 0 )
         {
             ret = recv( sock->sock, p, togo, 0 );
-            if( ret < 0 ) return 0; 		// negative is an error message
+            if( ret < 0 ) return -1; 		// negative is an error message
             if( ret == 0 ) return len - togo;	// zero is end-of-transmission
             togo -= ret;
             p += ret;

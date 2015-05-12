@@ -39,7 +39,7 @@
 extern "C" {
 #endif 
 
-#ifdef __PLATFORM_WIN32__
+#if 0 && defined __PLATFORM_WIN32__
 
     double round( double a );
     double trunc( double a );

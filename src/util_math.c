@@ -36,7 +36,7 @@
 
 
 // windows / visual c++
-#ifdef __PLATFORM_WIN32__
+#if 0 && defined __PLATFORM_WIN32__
 
 
 //-----------------------------------------------------------------------------
@@ -64,9 +64,9 @@ double trunc( double a )
 // name: remainder()
 // desc: ...
 //-----------------------------------------------------------------------------
-double remainder( long a, long b )
+double remainder( double a, double b )
 {
-    long div = a/b;
+    double div = a/b;
     return a - b*div;
 }
 

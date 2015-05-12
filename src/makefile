@@ -4,7 +4,7 @@ DESTDIR?=/usr/bin
 current: 
 	@echo "[chuck build]: please use one of the following configurations:"
 	@echo "   make linux-alsa, make linux-jack, make linux-pulse,"
-	@echo "   make osx, make osx-ub, make cygwin, or make win32"
+	@echo "   make osx, make osx-ub, make cygwin, make win32, make mingw, or make psocket [-win32]"
 
 install:
 	mkdir -p $(DESTDIR)
@@ -18,8 +18,8 @@ MAKECMDGOALS:=$(.DEFAULT_GOAL)
 endif
 endif
 
-.PHONY: osx linux-pulse linux-jack linux-alsa cygwin osx-rl
-osx linux-pulse linux-jack linux-alsa cygwin osx-rl: chuck
+.PHONY: osx linux-pulse linux-jack linux-alsa cygwin psocket psocket-win32 psocket-osx mingw osx-rl
+osx linux-pulse linux-jack linux-alsa cygwin psocket psocket-win32 psocket-osx mingw osx-rl: chuck
 
 win32:
 	make -f makefile.win32
@@ -72,6 +72,22 @@ ifneq (,$(strip $(filter cygwin,$(MAKECMDGOALS))))
 include makefile.cygwin
 endif
 
+ifneq (,$(strip $(filter psocket,$(MAKECMDGOALS))))
+include makefile.psocket
+endif
+
+ifneq (,$(strip $(filter mingw,$(MAKECMDGOALS))))
+include makefile.mingw
+endif
+
+ifneq (,$(strip $(filter psocket-win32,$(MAKECMDGOALS))))
+include makefile.psocket.win32
+endif
+
+ifneq (,$(strip $(filter psocket-osx,$(MAKECMDGOALS))))
+include makefile.psocket.osx
+endif
+
 ifneq (,$(strip $(filter osx-rl,$(MAKECMDGOALS))))
 include makefile.rl
 endif
@@ -87,15 +103,28 @@ CXXSRCS+= chuck_absyn.cpp chuck_parse.cpp chuck_errmsg.cpp \
     digiio_rtaudio.cpp hidio_sdl.cpp \
 	midiio_rtmidi.cpp RtAudio/RtAudio.cpp rtmidi.cpp ugen_osc.cpp ugen_filter.cpp \
 	ugen_stk.cpp ugen_xxx.cpp ulib_machine.cpp ulib_math.cpp ulib_std.cpp \
-	ulib_opsc.cpp ulib_regex.cpp util_buffers.cpp util_console.cpp \
+	util_buffers.cpp util_console.cpp \
 	util_string.cpp util_thread.cpp util_opsc.cpp util_serial.cpp \
-	util_hid.cpp uana_xform.cpp uana_extract.cpp
+	util_hid.cpp uana_xform.cpp uana_extract.cpp \
+	ulib_net.cpp
+    
+ifeq (,$(strip $(filter mingw,$(MAKECMDGOALS))))
+CXXSRCS += ulib_opsc.cpp ulib_regex.cpp 
+CFLAGS += -DUSE_OPSC -DUSE_REGEX
+endif
+
 LO_CSRCS+= lo/address.c lo/blob.c lo/bundle.c lo/message.c lo/method.c \
     lo/pattern_match.c lo/send.c lo/server.c lo/server_thread.c lo/timetag.c
 
 COBJS=$(CSRCS:.c=.o)
 CXXOBJS=$(CXXSRCS:.cpp=.o)
 LO_COBJS=$(LO_CSRCS:.c=.o)
+
+
+ifeq (,$(strip $(filter mingw,$(MAKECMDGOALS))))
+OBJS += $(LO_COBJS)
+endif
+
 OBJS=$(COBJS) $(CXXOBJS) $(LO_COBJS)
 
 LO_CFLAGS=-DHAVE_CONFIG_H -I.

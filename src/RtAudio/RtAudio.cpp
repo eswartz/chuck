@@ -4421,7 +4421,7 @@ bool RtApiDs :: probeDeviceOpen( unsigned int device, StreamMode mode, unsigned 
     unsigned threadId;
     stream_.callbackInfo.isRunning = true;
     stream_.callbackInfo.object = (void *) this;
-#ifdef __CYGWIN__
+#if defined __CYGWIN__ || defined __MINGW32__
     stream_.callbackInfo.thread = (ThreadHandle) CreateThread( NULL, 0, (LPTHREAD_START_ROUTINE) &callbackHandler,
                                                                &stream_.callbackInfo, 0, (DWORD*) &threadId );
 #else

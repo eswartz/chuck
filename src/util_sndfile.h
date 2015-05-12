@@ -136,7 +136,18 @@
 #define TYPEOF_SF_COUNT_T off_t
 #endif
 
-#if     defined(__PLATFORM_WIN32__) //Dev Studio
+#if     defined(__MINGW32__)
+#define CPU_CLIPS_POSITIVE 0
+#define CPU_IS_BIG_ENDIAN 0
+#define CPU_IS_LITTLE_ENDIAN 1
+#define HAVE_LRINTF 1
+#define HAVE_LRINT 1
+#define OS_IS_MACOSX 0
+#define OS_IS_WIN32 1
+#define TYPEOF_SF_COUNT_T off_t
+#endif
+
+#if     defined(_MSCVRT) //Dev Studio
 #define CPU_CLIPS_POSITIVE 0
 #define CPU_IS_BIG_ENDIAN 0
 #define CPU_IS_LITTLE_ENDIAN 1
@@ -150,6 +161,7 @@
 #define OS_IS_WIN32 1
 #define TYPEOF_SF_COUNT_T off_t
 #endif
+
 
 #if     defined (__WINDOWS_PTHREAD__) //Cygwin
 #define CPU_CLIPS_POSITIVE 0
@@ -190,7 +202,7 @@
 // in the microsoft vc6 compiler...
 // and other ms win32 specialteez. 
 
-#ifdef __PLATFORM_WIN32__
+#ifdef _MSVCRT
 
 #define C_INLINE __inline 
 #define SF_COUNT_MAX 0x7FFFFFFFFFFFFFFF
@@ -2477,7 +2489,7 @@ extern word gsm_FAC [8] ;
     #define __USE_ISOC99    1
 
 
-#elif ( defined (WIN32) || defined (_WIN32) || defined(__PLATFORM_WIN32__) || defined(__LITTLE_ENDIAN__) )
+#elif defined(_MSCVRT) 
 
     #undef      HAVE_LRINT_REPLACEMENT
     #define     HAVE_LRINT_REPLACEMENT  1

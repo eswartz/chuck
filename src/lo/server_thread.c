@@ -17,13 +17,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <pthread.h>
 #include <sys/types.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
+#include <pthread.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <sys/socket.h>

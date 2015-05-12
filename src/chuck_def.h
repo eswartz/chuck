@@ -148,9 +148,7 @@ typedef struct { SAMPLE re ; SAMPLE im ; } t_CKCOMPLEX_SAMPLE;
 #endif
 
 #ifdef __PLATFORM_WIN32__
-#ifndef usleep
-#define usleep(x) Sleep( (x / 1000 <= 0 ? 1 : x / 1000) )
-#endif
+#include <unistd.h>
 #pragma warning (disable : 4996)  // stdio deprecation
 #pragma warning (disable : 4786)  // stl debug info
 #pragma warning (disable : 4312)  // type casts from void*

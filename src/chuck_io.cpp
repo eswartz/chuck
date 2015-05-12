@@ -37,14 +37,15 @@
 #include "chuck_globals.h"
 #include "chuck_vm.h"
 
-#ifndef __WINDOWS_DS__
+#ifndef _WIN32
 #include <sys/select.h>
 #include <poll.h>
 #include <termios.h>
 #include <unistd.h>
 #else
+#include <stdint.h>
 #include <io.h>
-#endif // __WINDOWS_DS__
+#endif // _WIN32
 #include <fcntl.h>
 #include <math.h>
 
@@ -53,11 +54,6 @@
 using namespace std;
 
 
-#ifdef __WINDOWS_DS__
-typedef BYTE uint8_t;
-typedef WORD uint16_t;
-typedef DWORD uint32_t;
-#endif 
 
 
 // available baud rates
@@ -163,7 +159,7 @@ Chuck_IO_Serial::~Chuck_IO_Serial()
 
 t_CKBOOL Chuck_IO_Serial::ready()
 {
-#ifndef __WINDOWS_DS__
+#ifndef _WIN32
     struct pollfd pollfds;
     pollfds.fd = m_fd;
     pollfds.events = POLLIN;
