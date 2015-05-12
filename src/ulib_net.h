@@ -57,6 +57,7 @@ CK_DLL_CTRL( netout_ctrl_type );
 CK_DLL_CGET( netout_cget_type );
 CK_DLL_CTRL( netout_ctrl_seqnum );
 CK_DLL_CGET( netout_cget_seqnum );
+CK_DLL_MFUN( netout_start );
 
 // netin
 UGEN_CTOR netin_ctor( t_CKTIME now );

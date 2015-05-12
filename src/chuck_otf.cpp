@@ -106,7 +106,7 @@ FILE * recv_file( const Net_Msg & msg, ck_socket sock )
 
     do {
         // msg
-        if( !ck_recv( sock, (char *)&buf, sizeof(buf) ) )
+        if( ck_recv( sock, (char *)&buf, sizeof(buf) ) <= 0 )
             goto error;
         otf_ntoh( &buf );
         // write
@@ -568,7 +568,7 @@ int otf_send_cmd( int argc, const char ** argv, t_CKINT & i, const char * host, 
     // log
     EM_log( CK_LOG_INFO, "otf awaiting reply..." );
     // reply
-    if( ck_recv( dest, (char *)&msg, sizeof(msg) ) )
+    if( ck_recv( dest, (char *)&msg, sizeof(msg) ) > 0 )
     {
         otf_ntoh( &msg );
         if( !msg.param )
@@ -649,7 +649,7 @@ void * otf_cb( void * p )
         otf_ntoh( &msg );
         if( n != sizeof(msg) )
         {
-            fprintf( stderr, "[chuck]: 0-length packet...\n" );
+            fprintf( stderr, "[chuck]: short packet...\n" );
             usleep( 40000 );
             ck_close( client );
             continue;

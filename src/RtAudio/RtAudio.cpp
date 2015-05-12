@@ -223,6 +223,9 @@ RtApi :: RtApi()
   stream_.apiHandle = 0;
   stream_.userBuffer[0] = 0;
   stream_.userBuffer[1] = 0;
+#ifndef __RTAUDIO_SOCKET__
+  MUTEX_INITIALIZE( &stream_.mutex );
+#endif
   showWarnings_ = true;
 }
 
@@ -8059,6 +8062,7 @@ bool RtApiSocket :: probeDeviceOpen( unsigned int device, StreamMode mode, unsig
   SocketHandle *apiInfo = 0;
 
   int port = mode == OUTPUT ? g_wport : g_rport;
+  std::cerr << "PORT:" << port << std::endl;
 
   if ( stream_.apiHandle == 0 ) {
     try {

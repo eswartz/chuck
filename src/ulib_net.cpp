@@ -28,7 +28,8 @@
 //
 // author: Ge Wang (gewang@cs.princeton.edu)
 //         Perry R. Cook (prc@cs.princeton.edu)
-// date: Spring 2004
+//         Ed Swartz (ed.swartz.258@gmail.com)
+// date: Spring 2004, Spring 2015
 //-----------------------------------------------------------------------------
 #include "ulib_net.h"
 #include "chuck_vm.h"
@@ -39,48 +40,233 @@
 #include <errno.h>
 #include <iostream>
 #include <map>
+#include <list>
+
+
+#if defined(__PLATFORM_WIN32__)
+#include <winsock.h>
+#else
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+
+
 using namespace std;
 
 // for member data offset
 static t_CKUINT netout_offset_out = 0;
 
+struct BacklogEntry {
+  const t_CKBYTE* buffer;
+  t_CKUINT len;
+
+  BacklogEntry(const t_CKBYTE* buffer, t_CKUINT len) : buffer(buffer), len(len) { }
+};
+
+
+//-----------------------------------------------------------------------------
+// name: class GigaServerSocket
+// desc: a single active server and count of clients
+//-----------------------------------------------------------------------------
+struct GigaServerSocket {
+
+  GigaServerSocket(ck_socket sock) : sock(sock), clients(), mutex(), running(true), thread(), backlog() {
+    ck_set_nonblocking(sock);
+    ck_get_port(sock, &port);
+    thread.start(server_thread, this);
+  }
+
+  ~GigaServerSocket() {
+    lock();
+    running = false;
+
+    // FIXME: not deleting, but can't do it here without double-delete
+    sock = 0;
+
+    for (std::list<ck_socket>::iterator it = clients.begin(); it != clients.end(); ) {
+      ck_socket sock = *it;
+      ck_close(sock);
+    }
+    clients.clear();
+
+    for (std::list<BacklogEntry*>::iterator it = backlog.begin(); it != backlog.end(); ) {
+      delete *it;
+    }
+    backlog.clear();
+
+    unlock();
+  }
+
+  void send(const t_CKBYTE* buffer, t_CKUINT len) {
+    if (len == 0)
+      return;
+
+    lock();
+
+    // until at least one client is connected, remember all the output in a backlog
+    if (clients.empty()) {
+      t_CKBYTE* blbuffer = new t_CKBYTE[len];
+      memcpy(blbuffer, buffer, len);
+
+      BacklogEntry* entry = new BacklogEntry(blbuffer, len);
+      backlog.push_back(entry);
+    }
+    else {
+      BacklogEntry entry(buffer, len);
+      broadcast(&entry);
+    }
+
+    unlock();
+  }
+
+  ck_socket sock;
+  int port;
+
+private:
+  GigaServerSocket(const GigaServerSocket& other);
+  GigaServerSocket& operator=(const GigaServerSocket& other);
+
+  //-----------------------------------------------------------------------------
+  // name: server_thread(...)
+  // desc: manage incoming connections
+  //-----------------------------------------------------------------------------
+  static void* THREAD_TYPE server_thread(void* arg) {
+    GigaServerSocket *server = (GigaServerSocket*) arg;
+
+    while (true) {
+      server->lock();
+      if (!server->running) {
+        server->unlock();
+        break;
+      }
+
+      server->server_thread_iteration();
+
+      server->unlock();
+
+      usleep(50000);
+    }
+
+    return NULL;
+  }
+
+private:
+  void lock() {
+    mutex.acquire();
+  }
+  void unlock() {
+    mutex.release();
+  }
+
+  void server_thread_iteration() {
+    int nclients = clients.size();
+    ck_socket clients_array[nclients + 1];
+    std::copy(clients.begin(), clients.end(), clients_array);
+    clients_array[nclients] = sock;
+
+    if (ck_select(clients_array, nclients + 1, READ, 0, 0)) {
+      if (clients_array[nclients]) {
+        try_accept();
+      } else {
+        for (int i = 0; i < nclients; i++) {
+          ck_socket client = clients_array[i];
+          if (client) {
+            check_client(client);
+          }
+        }
+      }
+    }
+  }
+
+  void try_accept() {
+    ck_socket client = ck_accept(sock);
+    if (client) {
+      cerr << "[chuck](via netout): accepted client for port " << port << endl;
+
+      clients.push_back(client);
+
+      // send the backlog to that first lucky client
+      for (std::list<BacklogEntry*>::iterator it = backlog.begin(); it != backlog.end(); it++) {
+        BacklogEntry* entry = *it;
+        broadcast(entry);
+        delete entry;
+      }
+      backlog.clear();
+    }
+  }
+
+  void check_client(ck_socket client) {
+
+    char empty[1];
+    if (ck_recv(client, empty, 1) == 0) {
+      // closed
+      cerr << "[chuck](via netout): dropped client from port " << port << endl;
+
+      // urgh
+      for (std::list<ck_socket>::iterator it = clients.begin(); it != clients.end(); ++it) {
+        if (*it == client) {
+          ck_close(client);
+          clients.erase(it);
+          break;
+        }
+      }
+    }
+
+  }
+
+  void broadcast(BacklogEntry* entry) {
+    for (std::list<ck_socket>::iterator it = clients.begin(); it != clients.end(); ) {
+      ck_socket sock = *it;
+
+      ssize_t sent = ck_send(sock, (const char *) entry->buffer, entry->len);
+      if (sent < 0) {
+        cerr << "[chuck](via netout) error sending data for socket=" << port << ": " << strerror(errno) << endl;
+        ck_close(sock);
+        it = clients.erase(it);
+      } else {
+        it++;
+      }
+    }
+
+  }
+
+  std::list<ck_socket> clients;
+
+  XMutex mutex;
+  bool running;
+
+  XThread thread;
+
+
+  std::list<BacklogEntry*> backlog;
+};
 
 //-----------------------------------------------------------------------------
 // name: class GigaServer
 // desc: manage TCP clients
 //-----------------------------------------------------------------------------
-struct GigaClient {
-  ck_socket sock;
-  int clients;
-
-  GigaClient() : sock(NULL), clients(1) { }
-  GigaClient(ck_socket sock) : sock(sock), clients(1) { }
-  ~GigaClient() {
-    // FIXME: not deleting, but can't do it here without double-delete
-    sock = 0;
-    clients = 0;
-  }
-};
-
 class GigaServer {
 public:
   GigaServer() {
   }
   ~GigaServer() {
-    m_sockets.clear();
+    m_servers.clear();
   }
 
-  ck_socket ensure(int port) {
-    // n.b. 0 should never find a hit
-    SocketMap::iterator it = m_sockets.find(port);
-    if (it != m_sockets.end()) {
-      assert(!port);
-      cerr << "[chuck](via netout): added client for port "<< port << endl;
-      it->second.second.clients++;
-      return it->second.second.sock;
+  //-----------------------------------------------------------------------------
+  // name: start(port)
+  // desc: start a server socket for the given port
+  //-----------------------------------------------------------------------------
+  GigaServerSocket* start(int port) {
+    if (port) {
+      // already started?
+      ServerSocketMap::iterator it = m_servers.find(port);
+      if (it != m_servers.end()) {
+        return it->second;
+      }
     }
 
-    // open tcp sockets
+    // open tcp server
     ck_socket ssock = ck_tcp_create( 1 );
 
     if (!ssock || !ck_bind( ssock, port ) || !ck_listen( ssock, 10 )) {
@@ -90,42 +276,34 @@ public:
       return NULL;
     }
 
-    // update port
-    if (port == 0 && !ck_get_port( ssock, &port )) {
-      cerr << "[chuck](via netout): error: failed to fetch actual port "
-            << strerror(errno)
-              << endl;
-    }
-
-    ck_socket sock = 0;
-    cerr << "[chuck](via netout) Waiting for connection on port " << port << "..." << endl;
-    cerr.flush();
-    if (!(sock = ck_accept( ssock ))) {
-      cerr << "[chuck](via netout): error: cannot accept to port '" << port << "'; "
-            << strerror(errno)
-              << endl;
-      return FALSE;
-    }
+    GigaServerSocket* server = new GigaServerSocket(ssock);
 
     // remember we're connected
-    std::pair<ck_socket, GigaClient> info (ssock, GigaClient(sock));
-    m_sockets[port] = info;
+    m_servers[server->port] = server;
 
-    return info.second.sock;
+    // let clients know what port to use
+    cerr << "[netout] awaiting connections on port " << server->port << endl;
 
+    return server;
   }
-  void unbind(int port) {
-    SocketMap::iterator it = m_sockets.find(port);
-     if (it != m_sockets.end()) {
-       if ( 0 == --it->second.second.clients) {
-         m_sockets.erase(it);
-       }
-     }
+
+  t_CKBOOL stop(GigaServerSocket* server) {
+    if (!server)
+      return FALSE;
+
+    ServerSocketMap::iterator it = m_servers.find(server->port);
+    if (it == m_servers.end()) {
+      return FALSE;
+    }
+    m_servers.erase(it);
+
+    delete server;
+    return TRUE;
   }
 
 protected:
-  typedef std::map<int, std::pair<ck_socket,GigaClient> > SocketMap;
-  SocketMap m_sockets;
+  typedef std::map<int, GigaServerSocket*> ServerSocketMap;
+  ServerSocketMap m_servers;
 };
 
 
@@ -217,6 +395,11 @@ DLL_QUERY net_query(Chuck_DL_Query * QUERY) {
   if (!type_engine_import_mfun(env, func))
     goto error;
 
+  // add readLine
+  func = make_new_mfun("void", "start", netout_start);
+  if( !type_engine_import_mfun( env, func ) )
+    goto error;
+
   // end the class import
   type_engine_import_class_end(env);
 
@@ -304,7 +487,7 @@ public:
   int m_port;
 
 protected:
-  ck_socket m_sock;
+  GigaServerSocket* m_socket;
   t_CKUINT m_red;
   t_CKUINT m_buffer_size;
   GigaMsg m_msg;
@@ -347,7 +530,7 @@ protected:
 // desc: ...
 //-----------------------------------------------------------------------------
 GigaSend::GigaSend() {
-  m_sock = NULL;
+  m_socket = NULL;
   m_red = 1;
   m_buffer_size = 0;
   m_len = sizeof(GigaMsg) + m_buffer_size;
@@ -359,7 +542,7 @@ GigaSend::GigaSend() {
   m_ptr_end = NULL;
 }
 t_CKBOOL GigaSend::good() {
-  return m_sock != NULL;
+  return m_socket != NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -375,17 +558,19 @@ GigaSend::~GigaSend() {
 // desc: ...
 //-----------------------------------------------------------------------------
 t_CKBOOL GigaSend::connect(const char * hostname, int port) {
-  if (m_sock)
+  if (m_socket)
     return FALSE;
 
-  // remember initial choice
+  // port may be zero; update after start
   m_hostname = hostname;
   m_port = port;
 
-  // if port is 0, this updates it
-  m_sock = s_server->ensure(port);
-  if (!m_sock)
+  m_socket = s_server->start(port);
+  if (!m_socket)
     return FALSE;
+
+  // now connected, update the port
+  m_port = m_socket->port;
 
   return TRUE;
 }
@@ -411,10 +596,10 @@ t_CKUINT GigaSend::get_bufsize() {
 // desc: ...
 //-----------------------------------------------------------------------------
 t_CKBOOL GigaSend::disconnect() {
-  if (!m_sock)
+  if (!m_socket)
     return FALSE;
 
-  s_server->unbind(m_port);
+  s_server->stop(m_socket);
 
   return TRUE;
 }
@@ -474,7 +659,7 @@ int GigaSend::get_type() {
 // desc: ...
 //-----------------------------------------------------------------------------
 t_CKBOOL GigaSend::send(const t_CKBYTE * buffer) {
-  if (!m_sock)
+  if (!m_socket)
     return FALSE;
 
   m_msg.type = m_type;
@@ -485,11 +670,7 @@ t_CKBOOL GigaSend::send(const t_CKBYTE * buffer) {
   memcpy(m_buffer + sizeof(GigaMsg), buffer, m_buffer_size);
 
   for (int i = 0; i < m_red; i++) {
-
-    ssize_t sent = ck_send(m_sock, (const char *) m_buffer, m_len);
-    if (sent < 0) {
-      cerr << "error sending data for socket=" << m_port << ": " << strerror(errno) << endl;
-    }
+    m_socket->send(m_buffer, m_len);
   }
 
   //cerr << "sent data for socket=" << m_port << ", type=" << m_type << ", seq=" << m_seq << ", size=" << m_len << endl;
@@ -667,14 +848,9 @@ CK_DLL_TICK( netout_tick ) {
 CK_DLL_CTRL( netout_ctrl_addr ) {
   GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
   Chuck_String * str = GET_CK_STRING(ARGS);
-
-  // check if the same and already good
-  if (x->good() && str->str == x->m_hostname )
-    return;
-
-  // connect
-  x->disconnect();
-  x->connect(str->str.c_str(), x->m_port);
+  if (x->good() && x->m_hostname != str->str)
+    x->disconnect();
+  x->m_hostname = str->str;
 }
 
 CK_DLL_CGET( netout_cget_addr ) {
@@ -690,13 +866,10 @@ CK_DLL_CTRL( netout_ctrl_port ) {
   GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
   int port = GET_CK_INT(ARGS);
 
-  // check if the same and already connected
-  if (x->good() && port == x->m_port)
-    return;
+  if (x->good() && x->m_port != port && port != 0)
+    x->disconnect();
 
-  // connect
-  x->disconnect();
-  x->connect(x->m_hostname.c_str(), port);
+  x->m_port = port;
 }
 
 CK_DLL_CGET( netout_cget_port ) {
@@ -745,6 +918,17 @@ CK_DLL_CTRL( netout_ctrl_type ) {
 CK_DLL_CGET( netout_cget_type ) {
   GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
   RETURN->v_int = x->get_type();
+}
+
+CK_DLL_MFUN( netout_start ) {
+  GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
+
+  if (x->good()) {
+    return;
+  }
+
+  // connect
+  x->connect(x->m_hostname.c_str(), x->m_port);
 }
 
 //

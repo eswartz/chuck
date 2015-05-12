@@ -49,6 +49,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/ioctl.h>
 #endif
 
 
@@ -139,7 +140,7 @@ ck_socket ck_tcp_create( int flags )
 
     if( flags )
         setsockopt( sock->sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&ru, sizeof(ru) );
-    setsockopt( sock->sock, SOL_SOCKET, SO_REUSEPORT, (const char *)&ru, sizeof(ru) );
+    // setsockopt( sock->sock, SOL_SOCKET, SO_REUSEPORT, (const char *)&ru, sizeof(ru) );
     setsockopt( sock->sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&nd, sizeof(nd) );
 
     return sock;
@@ -305,6 +306,79 @@ error:
 
 
 
+//-----------------------------------------------------------------------------
+// name: ck_select()
+// desc: ...
+//-----------------------------------------------------------------------------
+// tell if the given socket has any activity via select();
+// return number of relevant entries;
+// clear entries in the array that aren't active, leaving sparse array
+int ck_select( ck_socket* socks, t_CKUINT nsocks, t_select type, long sec, long usec )
+{
+    fd_set readfds, writefds, exceptfds;
+    FD_ZERO(&readfds);
+    FD_ZERO(&writefds);
+    FD_ZERO(&exceptfds);
+
+    int maxfd = 0;
+    t_CKUINT i;
+    for (i = 0; i < nsocks; i++) {
+      int fd = socks[i]->sock;
+      if (!fd)
+        continue;
+      if (fd > maxfd) maxfd = fd;
+
+      if (type == READ)
+        FD_SET(fd, &readfds);
+      if (type == WRITE)
+        FD_SET(fd, &writefds);
+      FD_SET(fd, &exceptfds);
+    }
+
+    struct timeval timeout;
+    timeout.tv_sec = sec;
+    timeout.tv_usec = usec;
+
+    int ret = select(maxfd + 1, &readfds, &writefds, &exceptfds, &timeout);
+    if (ret <= 0) {
+      memset(socks, 0, sizeof(ck_socket*) * nsocks);
+      return ret;
+    }
+
+    for (i = 0; i < nsocks; i++) {
+      int fd = socks[i]->sock;
+      if (FD_ISSET(fd, &readfds)
+          || FD_ISSET(fd, &writefds)
+          || FD_ISSET(fd, &exceptfds)) {
+        // good
+      } else {
+        socks[i] = NULL;
+      }
+    }
+
+    return ret;
+}
+
+
+//-----------------------------------------------------------------------------
+// name: ck_set_nonblocking()
+// desc: ...
+//-----------------------------------------------------------------------------
+t_CKBOOL ck_set_nonblocking( ck_socket sock )
+{
+    if (!sock)
+      return FALSE;
+
+    int one = 1;
+    if (ioctl( sock->sock, FIONBIO, &one))
+      return FALSE;
+
+    return TRUE;
+
+}
+
+
+
 
 //-----------------------------------------------------------------------------
 // name: ck_send()
@@ -369,6 +443,9 @@ int ck_recvfrom( ck_socket sock, char * buffer, int len,
 //-----------------------------------------------------------------------------
 int ck_recv( ck_socket sock, char * buffer, int len ) 
 {
+    if (!sock)
+      return -1;
+
     if( sock->prot == SOCK_STREAM )
     {
         int ret;
@@ -377,7 +454,7 @@ int ck_recv( ck_socket sock, char * buffer, int len )
         while( togo > 0 )
         {
             ret = recv( sock->sock, p, togo, 0 );
-            if( ret < 0 ) return 0; 		// negative is an error message
+            if( ret < 0 ) return -1; 		// negative is an error message
             if( ret == 0 ) return len - togo;	// zero is end-of-transmission
             togo -= ret;
             p += ret;
