@@ -52,6 +52,7 @@
 #include <sys/ioctl.h>
 #endif
 
+#include <errno.h>
 
 
 
@@ -386,7 +387,24 @@ t_CKBOOL ck_set_nonblocking( ck_socket sock )
 //-----------------------------------------------------------------------------
 int ck_send( ck_socket sock, const char * buffer, int len ) 
 {
-    return send( sock->sock, buffer, len, 0 );
+    //return send( sock->sock, buffer, len, 0 );
+
+    int ret;
+    int togo = len;
+    char * p = buffer;
+    while( togo > 0 )
+    {
+       ret = send( sock->sock, p, togo, 0 );
+       if( ret < 0 ) {
+         if (errno == EAGAIN)
+           continue;
+         return -1;    // negative is an error message
+       }
+       if( ret == 0 ) return len - togo; // zero is end-of-transmission
+       togo -= ret;
+       p += ret;
+    }
+    return len;
 }
 
 
