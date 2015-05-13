@@ -744,7 +744,15 @@ t_CKBOOL Chuck_VM::run( t_CKINT num_samps )
         if( !compute() ) goto vm_stop;
 
         // start audio
-        if( !m_audio_started ) start_audio();
+        if( !m_audio_started )
+        {
+            start_audio();
+        }
+        else if ( !m_audio && !m_num_shreds )
+        {
+            // don't eat CPU for no reason
+            usleep(1000);
+        }
 
         // advance the shreduler
         if( !m_shreduler->m_adaptive )
