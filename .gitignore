@@ -2,6 +2,7 @@
 *.o
 
 src/chuck
+src/chuck.exe
 src/chuck.output
 src/chuck.tab.c
 src/chuck.tab.h
