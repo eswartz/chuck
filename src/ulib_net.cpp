@@ -709,10 +709,12 @@ t_CKTIME GigaSend::get_system_time() {
 #ifdef _WIN32
   DWORD ticks = GetTickCount();
   now = (ticks / 1000.0);
-#else
+#elif _POSIX_C_SOURCE >= 199309L
   struct timespec tp;
   clock_gettime(CLOCK_REALTIME, &tp);
   now = tp.tv_sec + ((t_CKTIME) tp.tv_nsec / 1000000000.0);
+#else
+  now = time(NULL);
 #endif
   return now;
 }
