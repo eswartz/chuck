@@ -36,6 +36,7 @@
 #include "chuck_lang.h"
 #include "chuck_instr.h"
 #include "util_network.h"
+#include "digiio_rtaudio.h"
 #include <string.h>
 #include <errno.h>
 #include <iostream>
@@ -395,7 +396,18 @@ DLL_QUERY net_query(Chuck_DL_Query * QUERY) {
   if (!type_engine_import_mfun(env, func))
     goto error;
 
-  // add readLine
+  // add ctrl: realtime
+  func = make_new_mfun("int", "real_time", netout_ctrl_realtime);
+  func->add_arg("int", "real_time");
+  func->doc = "Whether content is sent over the network in real time (1; slower) or as quickly as ChucKed (0).";
+  if (!type_engine_import_mfun(env, func))
+    goto error;
+  func = make_new_mfun("int", "real_time", netout_cget_realtime);
+  func->doc = "Whether content is sent over the network in real time (1; slower) or as quickly as ChucKed (0).";
+  if (!type_engine_import_mfun(env, func))
+    goto error;
+
+  // add start
   func = make_new_mfun("void", "start", netout_start);
   if( !type_engine_import_mfun( env, func ) )
     goto error;
@@ -482,6 +494,9 @@ public:
   void set_type( int type );
   int get_type();
 
+  void set_realtime( bool realtime );
+  bool is_realtime();
+
   // data
   string m_hostname;
   int m_port;
@@ -495,8 +510,16 @@ protected:
   t_CKBYTE m_buffer[0x8000];
   int m_seq;
   int m_type;
+  bool m_realtime;
+  t_CKTIME m_sent_time;
+  t_CKTIME m_next_sent_time_sync;
 
   SAMPLE m_writebuf[0x8000];SAMPLE * m_ptr_w;SAMPLE * m_ptr_end;
+
+  static t_CKTIME s_base_time;
+  static void init_real_time();
+  static t_CKTIME get_system_time();
+  static t_CKTIME calc_real_time();
 };
 
 //-----------------------------------------------------------------------------
@@ -538,6 +561,9 @@ GigaSend::GigaSend() {
   m_port = 0;
   m_seq = 0;
   m_type = 0;
+  m_realtime = false;
+  m_sent_time = 0.0;
+  m_next_sent_time_sync = 0.0;
   m_ptr_w = m_writebuf;
   m_ptr_end = NULL;
 }
@@ -653,6 +679,50 @@ int GigaSend::get_type() {
 }
 
 
+//-----------------------------------------------------------------------------
+// name: set_realtime()
+// desc: ...
+//-----------------------------------------------------------------------------
+void GigaSend::set_realtime( bool realtime ) {
+  m_realtime = realtime;
+  init_real_time();
+  m_sent_time = s_base_time;
+  m_next_sent_time_sync = s_base_time + 1;
+}
+
+//-----------------------------------------------------------------------------
+// name: is_realtime()
+// desc: ...
+//-----------------------------------------------------------------------------
+bool GigaSend::is_realtime() {
+  return m_realtime ;
+}
+
+t_CKTIME GigaSend::s_base_time;
+
+void GigaSend::init_real_time() {
+  s_base_time = calc_real_time();
+}
+
+t_CKTIME GigaSend::get_system_time() {
+  t_CKTIME now;
+#ifdef _WIN32
+  DWORD ticks = GetTickCount();
+  now = (ticks / 1000.0);
+#else
+  struct timespec tp;
+  clock_gettime(CLOCK_REALTIME, &tp);
+  now = tp.tv_sec + ((t_CKTIME) tp.tv_nsec / 1000000000.0);
+#endif
+  return now;
+}
+
+t_CKTIME GigaSend::calc_real_time() {
+  t_CKTIME now = get_system_time();
+  if (!s_base_time)
+    s_base_time = now;
+  return now - s_base_time;
+}
 
 //-----------------------------------------------------------------------------
 // name: send()
@@ -669,10 +739,34 @@ t_CKBOOL GigaSend::send(const t_CKBYTE * buffer) {
   memcpy(m_buffer, &m_msg, sizeof(GigaMsg));
   memcpy(m_buffer + sizeof(GigaMsg), buffer, m_buffer_size);
 
+
   for (int i = 0; i < m_red; i++) {
     m_socket->send(m_buffer, m_len);
   }
 
+  if (is_realtime()) {
+    // figure how much real time that buffer represents
+    t_CKTIME buf_time = (t_CKTIME) m_buffer_size / Digitalio::sampling_rate() / Digitalio::num_channels_out() * 8 / Digitalio::bps();
+    m_sent_time += buf_time;
+
+#define SYNC_TIME_QUANTUM 1
+#define REALTIME_BUFFER_QUANTUM 1
+
+    if (m_sent_time >= m_next_sent_time_sync) {
+      // see what the real time is currently
+      t_CKTIME real_time = calc_real_time();
+      if (real_time < m_sent_time - REALTIME_BUFFER_QUANTUM) {
+        t_CKTIME diff_time = m_sent_time - real_time - SYNC_TIME_QUANTUM - REALTIME_BUFFER_QUANTUM;
+        if (diff_time > 0) {
+          long usecs = (long) (diff_time * 1000000L);
+          //cerr << "sleeping for " << usecs << " for " << real_time << " vs. " << m_sent_time << endl;
+          usleep(usecs);
+          m_sent_time = calc_real_time();
+        }
+      }
+      m_next_sent_time_sync = m_sent_time + SYNC_TIME_QUANTUM;
+    }
+  }
   //cerr << "sent data for socket=" << m_port << ", type=" << m_type << ", seq=" << m_seq << ", size=" << m_len << endl;
   return TRUE;
 }
@@ -919,6 +1013,19 @@ CK_DLL_CGET( netout_cget_type ) {
   GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
   RETURN->v_int = x->get_type();
 }
+
+CK_DLL_CTRL( netout_ctrl_realtime ) {
+  GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
+  int rt = GET_CK_INT(ARGS);
+  x->set_realtime(rt != 0);
+}
+
+CK_DLL_CGET( netout_cget_realtime ) {
+  GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
+  RETURN->v_int = x->is_realtime() ? 1 : 0;
+}
+
+
 
 CK_DLL_MFUN( netout_start ) {
   GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
