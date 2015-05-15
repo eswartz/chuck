@@ -149,6 +149,11 @@ typedef struct { SAMPLE re ; SAMPLE im ; } t_CKCOMPLEX_SAMPLE;
 
 #ifdef __PLATFORM_WIN32__
 #include <unistd.h>
+
+// max for random functions
+#define random() rand()
+#define srandom(s) srand(s)
+
 #pragma warning (disable : 4996)  // stdio deprecation
 #pragma warning (disable : 4786)  // stl debug info
 #pragma warning (disable : 4312)  // type casts from void*
