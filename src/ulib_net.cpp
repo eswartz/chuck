@@ -328,9 +328,8 @@ DLL_QUERY net_query(Chuck_DL_Query * QUERY) {
   //! TCP-based network audio transmitter
 
   type_engine_register_deprecate(env, "netout", "NetOut");
-  type_engine_register_deprecate(env, "netin", "NetIn");
 
-  if (!type_engine_import_ugen_begin(env, "NetOut", "UGen", env->global(),
+  if (!type_engine_import_ugen_begin(env, "NetOut", "UGen_Stereo", env->global(),
       netout_ctor, netout_dtor, netout_tick, NULL))
     return FALSE;
 
@@ -416,6 +415,7 @@ DLL_QUERY net_query(Chuck_DL_Query * QUERY) {
   type_engine_import_class_end(env);
 
 //
+//  type_engine_register_deprecate(env, "netin", "NetIn");
 //    // add netin
 //    //! TCP-based network audio receiver
 //    QUERY->begin_class( QUERY, "NetIn", "Object" );
