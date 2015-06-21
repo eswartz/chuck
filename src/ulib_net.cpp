@@ -99,9 +99,6 @@ struct GigaServerSocket {
   }
 
   void send(const t_CKBYTE* buffer, t_CKUINT len) {
-    if (len == 0)
-      return;
-
     lock();
 
     // until at least one client is connected, remember all the output in a backlog
@@ -294,11 +291,12 @@ public:
 
     ServerSocketMap::iterator it = m_servers.find(server->port);
     if (it == m_servers.end()) {
+      cerr << "no such server on port "<<server->port << " to delete!\n";
       return FALSE;
     }
+
     m_servers.erase(it);
 
-    delete server;
     return TRUE;
   }
 
@@ -410,6 +408,10 @@ DLL_QUERY net_query(Chuck_DL_Query * QUERY) {
   func = make_new_mfun("void", "start", netout_start);
   if( !type_engine_import_mfun( env, func ) )
     goto error;
+  // add stop
+  func = make_new_mfun("void", "stop", netout_stop);
+  if( !type_engine_import_mfun( env, func ) )
+    goto error;
 
   // end the class import
   type_engine_import_class_end(env);
@@ -496,6 +498,8 @@ public:
 
   void set_realtime( bool realtime );
   bool is_realtime();
+
+  t_CKBOOL stop();
 
   // data
   string m_hostname;
@@ -617,15 +621,42 @@ t_CKUINT GigaSend::get_bufsize() {
   return m_buffer_size;
 }
 
+
+//-----------------------------------------------------------------------------
+// name: stop()
+// desc: ...
+//-----------------------------------------------------------------------------
+t_CKBOOL GigaSend::stop() {
+  cerr << "GigaSend::stop\n";
+  if (!m_socket) {
+    return FALSE;
+  }
+
+  // send final packet
+  set_bufsize(0);
+  send(m_buffer);
+
+  return TRUE;
+}
+
 //-----------------------------------------------------------------------------
 // name: disconnect()
 // desc: ...
 //-----------------------------------------------------------------------------
 t_CKBOOL GigaSend::disconnect() {
-  if (!m_socket)
+  cerr << "GigaSend::disconnect\n";
+  if (!m_socket) {
+    cerr << "no socket\n";
     return FALSE;
+  }
+
+  // send final packet
+  set_bufsize(0);
+  send(m_buffer);
 
   s_server->stop(m_socket);
+
+  m_socket = NULL;
 
   return TRUE;
 }
@@ -1027,8 +1058,6 @@ CK_DLL_CGET( netout_cget_realtime ) {
   RETURN->v_int = x->is_realtime() ? 1 : 0;
 }
 
-
-
 CK_DLL_MFUN( netout_start ) {
   GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
 
@@ -1038,6 +1067,14 @@ CK_DLL_MFUN( netout_start ) {
 
   // connect
   x->connect(x->m_hostname.c_str(), x->m_port);
+}
+
+CK_DLL_MFUN( netout_stop ) {
+  GigaSend * x = (GigaSend *) OBJ_MEMBER_UINT(SELF, netout_offset_out);
+
+  if (x->good()) {
+    x->stop();
+  }
 }
 
 //
