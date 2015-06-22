@@ -627,7 +627,6 @@ t_CKUINT GigaSend::get_bufsize() {
 // desc: ...
 //-----------------------------------------------------------------------------
 t_CKBOOL GigaSend::stop() {
-  cerr << "GigaSend::stop\n";
   if (!m_socket) {
     return FALSE;
   }
