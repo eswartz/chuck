@@ -5313,7 +5313,7 @@ null_pointer:
 void Chuck_Instr_UGen_Array_Link::execute( Chuck_VM * vm, Chuck_VM_Shred * shred )
 {
     Chuck_Object **& sp = (Chuck_Object **&)shred->reg->sp;
-    Chuck_Object *src, *dst;
+    Chuck_Object *src_obj, *dst_obj;
     t_CKINT num_in;
     
     // pop
@@ -5321,13 +5321,19 @@ void Chuck_Instr_UGen_Array_Link::execute( Chuck_VM * vm, Chuck_VM_Shred * shred
     // check for null
     if( !*(sp+1) || !(*sp) ) goto null_pointer;
     
-    src = *sp;
-    dst = (*(sp + 1));
+    src_obj = *sp;
+    dst_obj = (*(sp + 1));
     
     // go for it
-    num_in = ugen_generic_num_in(dst, m_dstIsArray);
+    num_in = ugen_generic_num_in(dst_obj, m_dstIsArray);
     for( int i = 0; i < num_in; i++ )
-        ugen_generic_get_dst( dst, i, m_dstIsArray )->add( ugen_generic_get_src( src, i, m_srcIsArray ), FALSE);
+    {
+        Chuck_UGen *dst_ugen = ugen_generic_get_dst( dst_obj, i, m_dstIsArray );
+        Chuck_UGen *src_ugen = ugen_generic_get_src( src_obj, i, m_srcIsArray );
+        if( dst_ugen == NULL || src_ugen == NULL )
+            goto null_pointer;
+        dst_ugen->add( src_ugen, FALSE);
+    }
     
     // push the second
     push_( sp, *(sp + 1) );
@@ -5773,11 +5779,18 @@ void Chuck_Instr_Hack::execute( Chuck_VM * vm, Chuck_VM_Shred * shred )
     if( m_type_ref->size == sz_INT && iskindofint(m_type_ref) ) // ISSUE: 64-bit (fixed 1.3.1.0)
     {
         t_CKINT * sp = (t_CKINT *)shred->reg->sp;
-        if( !isa( m_type_ref, &t_string ) )
+        if( !isa( m_type_ref, &t_string ) ||  *(sp-1) == 0 )
+        {
             // print it
-            fprintf( stderr, "%ld :(%s)\n", *(sp-1), m_type_ref->c_name() );
+            if( *(sp-1) == 0 && isa( m_type_ref, &t_object ) )
+                fprintf( stderr, "null :(%s)\n", m_type_ref->c_name() );
+            else
+                fprintf( stderr, "%ld :(%s)\n", *(sp-1), m_type_ref->c_name() );
+        }
         else
+        {
             fprintf( stderr, "\"%s\" : (%s)\n", ((Chuck_String *)*(sp-1))->str.c_str(), m_type_ref->c_name() );
+        }
     }
     else if( m_type_ref->size == sz_FLOAT ) // ISSUE: 64-bit (fixed 1.3.1.0)
     {
@@ -5868,14 +5881,21 @@ void Chuck_Instr_Gack::execute( Chuck_VM * vm, Chuck_VM_Shred * shred )
         if( type->size == sz_INT && iskindofint(type) ) // ISSUE: 64-bit (fixed 1.3.1.0)
         {
             t_CKINT * sp = (t_CKINT *)the_sp;
-            if( !isa( type, &t_string ) )
+            if( !isa( type, &t_string ) ||  *(sp) == 0 )
             {
                 if( isa( type, &t_object ) )
+                {
                     // print it
-                    fprintf( stderr, "0x%lx ", *(sp) );
+                    if( *(sp-1) == 0 )
+                        fprintf( stderr, "null " );
+                    else
+                        fprintf( stderr, "0x%lx ", *(sp) );
+                }
                 else
+                {
                     // print it
                     fprintf( stderr, "%ld ", *(sp) );
+                }
             }
             else
             {

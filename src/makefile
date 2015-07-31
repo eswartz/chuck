@@ -24,7 +24,7 @@ osx linux-pulse linux-jack linux-alsa cygwin psocket psocket-win32 psocket-osx m
 win32:
 	make -f makefile.win32
 
-CK_VERSION=1.3.5.1-beta-1
+CK_VERSION=1.3.5.1
 
 LEX=flex
 YACC=bison
@@ -50,6 +50,11 @@ endif
 
 ifneq ($(CHUCK_STRICT),)
 CFLAGS+= -Wall
+endif
+
+ifneq ($(findstring arm,$(shell uname -m)),)
+# some sort of arm platform- enable aggressive optimizations
+CFLAGS+= -ffast-math
 endif
 
 ifneq (,$(strip $(filter osx bin-dist-osx,$(MAKECMDGOALS))))
