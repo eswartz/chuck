@@ -51,6 +51,7 @@
 #include <unistd.h>
 #endif
 
+#define DEBUG 0
 
 using namespace std;
 
@@ -74,12 +75,19 @@ struct GigaServerSocket {
   GigaServerSocket(ck_socket sock) : sock(sock), clients(), mutex(), running(true), thread(), backlog() {
     ck_set_nonblocking(sock);
     ck_get_port(sock, &port);
+#if DEBUG
+    cerr << "GigaServerSocket::GigaServerSocket port " << port << "\n";
+#endif
     thread.start(server_thread, this);
   }
 
   ~GigaServerSocket() {
     lock();
     running = false;
+
+#if DEBUG
+    cerr << "GigaServerSocket::~GigaServerSocket\n";
+#endif
 
     // FIXME: not deleting, but can't do it here without double-delete
     sock = 0;
@@ -100,6 +108,10 @@ struct GigaServerSocket {
 
   void send(const t_CKBYTE* buffer, t_CKUINT len) {
     lock();
+
+#if DEBUG
+    cerr << "GigaServerSocket::send " << len << " bytes to " << clients.size() << " clients\n";
+#endif
 
     // until at least one client is connected, remember all the output in a backlog
     if (clients.empty()) {
