@@ -2499,6 +2499,8 @@ extern word gsm_FAC [8] ;
     **  Therefore implement inline versions of these functions here.
     */
 
+// ge: some versions of windows have them
+#ifndef __WINDOWS_MODERN__
     __inline long int
     lrint (double flt)
     {   int intgr ;
@@ -2522,6 +2524,7 @@ extern word gsm_FAC [8] ;
 
         return intgr ;
     }
+#endif
 
 #elif (defined (__MWERKS__) && defined (macintosh))
 

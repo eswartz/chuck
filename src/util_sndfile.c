@@ -7935,7 +7935,10 @@ psf_log_syserr (SF_PRIVATE *psf, int error)
 #include <io.h>
 
 #ifndef HAVE_SSIZE_T
-typedef long ssize_t ;
+    // ge: this is needed in some/earlier versions of windows
+    #ifndef __WINDOWS_MODERN__
+    typedef long ssize_t ;
+    #endif
 #endif
 
 /* Win32 */ static void
@@ -8219,7 +8222,8 @@ psf_fclose (SF_PRIVATE *psf)
 {	int retval = 0 ;
 
 	if (psf->do_not_close_descriptor)
-	{	psf->filedes = (int) INVALID_HANDLE_VALUE ;
+	{
+    psf->filedes = (int) INVALID_HANDLE_VALUE ;
 		return 0 ;
 		} ;
 
@@ -25182,7 +25186,7 @@ sf_error (SNDFILE *sndfile)
 {	SF_PRIVATE	*psf ;
 
 	if (! sndfile)
-	{	if (sf_error != 0)
+	{	if (&sf_error != 0) // ge: added &
 			return 1 ;
 		return 0 ;
 		} ;
